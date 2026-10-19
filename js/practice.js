@@ -10,6 +10,9 @@
   function $all(s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); }
   function esc(s) { return app().esc(s); }
 
+  /* 音效便捷调用：集中生成在 sound.js，这里只在正确事件点触发（安全降级） */
+  function snd(name) { try { var S = window.Sound; if (S && typeof S[name] === "function") return S[name](); } catch (e) {} }
+
   var TYPE_LABEL = { mcq: "选择题", fill: "填空题", dialogue: "对话补全" };
   var IMP_LABEL = { essential: "必背", important: "重要", supporting: "辅助" };
 
@@ -121,10 +124,10 @@
 
     // 绑定单选变更
     $all('input[name="ps-mode"]', body).forEach(function (r) {
-      r.addEventListener("change", function () { cfg.mode = this.value; if (this.value === "unit" && cfg.unit === "all") cfg.unit = "U1"; renderSetup(); });
+      r.addEventListener("change", function () { cfg.mode = this.value; if (this.value === "unit" && cfg.unit === "all") cfg.unit = "U1"; snd("playNavTick"); renderSetup(); });
     });
-    $all('input[name="ps-unit"]', body).forEach(function (r) { r.addEventListener("change", function () { cfg.unit = this.value; renderSetup(); }); });
-    $all('input[name="ps-type"]', body).forEach(function (r) { r.addEventListener("change", function () { cfg.type = this.value; renderSetup(); }); });
+    $all('input[name="ps-unit"]', body).forEach(function (r) { r.addEventListener("change", function () { cfg.unit = this.value; snd("playNavTick"); renderSetup(); }); });
+    $all('input[name="ps-type"]', body).forEach(function (r) { r.addEventListener("change", function () { cfg.type = this.value; snd("playNavTick"); renderSetup(); }); });
     $all('input[name="ps-count"]', body).forEach(function (r) { r.addEventListener("change", function () { cfg.count = +this.value; renderSetup(); }); });
     $all('input[name="ps-timing"]', body).forEach(function (r) { r.addEventListener("change", function () { cfg.timing = this.value; renderSetup(); }); });
     $all('input[name="ps-time"]', body).forEach(function (r) { r.addEventListener("change", function () { cfg.timeLimit = +this.value; renderSetup(); }); });
@@ -195,7 +198,7 @@
         el.textContent = "剩余 " + m + ":" + (s < 10 ? "0" : "") + s;
         el.classList.toggle("danger", left < 60000);
       }
-      if (left <= 0) { stopTimer(); alert("时间到，自动提交。"); renderResults(true); }
+      if (left <= 0) { stopTimer(); snd("playMockSubmit"); alert("时间到，自动提交。"); renderResults(true); }
     }, 500);
   }
   function stopTimer() { if (timerId) { clearInterval(timerId); timerId = null; } }
@@ -311,6 +314,11 @@
     sess.answers[sess.index] = rec;
     Progress.record(rec);
 
+    // 音效：仅“立即讲解”模式在此判分一次即播对/错。
+    // 已过上方“已作答”与“未作答”守卫 → 每题至多一次；
+    // “完成后再讲解”模式不提前泄露对错，故此处不播（结果页统一提示）。
+    if (sess.timing === "immediate") { if (rec.correct) snd("playCorrect"); else snd("playIncorrect"); }
+
     // 锁定输入
     $all("#practice-body input").forEach(function (el) { el.disabled = true; });
     var sub = $("#btn-submit"); if (sub) { sub.disabled = true; sub.classList.add("used"); }
@@ -340,6 +348,8 @@
       h += '<div class="fb-row"><span class="fb-k">相关知识点：</span><span class="fb-v">' + esc(rec.knowledgePoint) + "</span></div>";
     if (rec.explanation)
       h += '<div class="fb-expl"><strong>讲解：</strong>' + esc(rec.explanation) + "</div>";
+    if (rec.explanation)
+      h += '<div class="fb-actions"><button type="button" class="btn ghost sm" data-act="expl-done">已读完解析</button></div>';
     if (!rec.correct) {
       // 其他选项为何不对（选择题）
       if (q.type === "mcq" && q.distractorExplanations) {
@@ -381,6 +391,14 @@
     var sess = app().getSession();
     if (!sess || !sess.answers.length) { renderSetup(); return; }
     stopTimer();
+
+    // 音效：结果“首次”展示时播一次，重绘不重复（用场次标记防重）。
+    // 模考 → 克制、区别化的结果提示；其余练习 → 简短成功旋律。
+    // 仅凭提交本身不播放“成功音”，成功音属于“看到成绩”这一刻。
+    if (!sess._resultsSoundPlayed) {
+      sess._resultsSoundPlayed = true;
+      if (sess.mode === "mock") snd("playMockResults"); else snd("playSessionComplete");
+    }
     var ans = sess.answers.filter(Boolean);
     var correct = ans.filter(function (a) { return a.correct; }).length;
     var wrong = ans.length - correct;
@@ -529,6 +547,8 @@
         if (!got) { alert(q.type === "mcq" ? "请先选择答案。" : "请先填写。"); return; }
         $all("input", overlay).forEach(function (i2) { i2.disabled = true; });
         var rec = { correct: got.correct, userAnswer: got.userAnswer, correctAnswer: got.correctAnswer, explanation: q.explanation, knowledgePoint: q.knowledgePoint };
+        // 音效：同类题预览为即时判分，播一次对/错（按钮随即禁用，防重复）
+        if (got.correct) snd("playCorrect"); else snd("playIncorrect");
         $("#q-feedback", overlay).innerHTML = feedbackHtml(rec, q) ;
         markOptionsIn(overlay, q, rec);
         act.disabled = true;
@@ -611,6 +631,9 @@
           return "<tr><td>" + new Date(s.at).toLocaleString() + "</td><td>" + esc(s.mode) + "</td><td>" + s.total + "</td><td>" + s.correct + "</td><td>" + s.accuracy + "%</td></tr>";
         }).join("") + "</tbody></table></div>";
     }
+
+    // 声音设置（面板 HTML 由 sound.js 提供，控件事件在 sound.js 内以 document 委托接线）
+    h += (window.Sound && window.Sound.settingsHtml) ? window.Sound.settingsHtml() : "";
 
     h += '<div class="results-actions"><button class="btn ghost" data-act="reset-progress">清空全部进度</button></div>';
     h += "</div>";

@@ -289,6 +289,21 @@ a{color:var(--blue)}
 
 .progress-page .stat-grid{margin-top:6px}
 
+/* 声音设置面板 */
+.sound-panel{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;margin-top:26px;box-shadow:var(--shadow)}
+.sound-panel .sub{margin-top:0}
+.snd-note{font-size:13px;color:var(--muted);margin:0 0 12px}
+.snd-master{display:flex;align-items:center;gap:20px;flex-wrap:wrap;padding-bottom:12px;border-bottom:1px dashed var(--line);margin-bottom:12px}
+.snd-volume{display:flex;align-items:center;gap:10px;flex:1;min-width:220px}
+.snd-vol-label{font-size:13.5px;font-weight:600;color:var(--ink-2);white-space:nowrap}
+.snd-vol-pct{font-size:13px;color:var(--green-d);font-weight:700;min-width:40px;text-align:right}
+.snd-volume input[type=range]{flex:1;min-width:120px;accent-color:var(--green);cursor:pointer;height:4px}
+.snd-cats{display:grid;grid-template-columns:repeat(2,1fr);gap:8px 18px}
+.snd-cats .check{font-size:13.5px;color:var(--ink-2)}
+.snd-cats .check input{width:16px;height:16px}
+.snd-actions{display:flex;gap:10px;margin-top:14px}
+.btn.ghost.sm{color:var(--ink-2)}
+
 /* 预览浮层 */
 .preview-overlay{position:fixed;inset:0;background:rgba(20,26,40,.55);z-index:100;display:flex;align-items:center;justify-content:center;padding:20px;overflow:auto}
 .preview-box{background:var(--bg);border-radius:16px;max-width:720px;width:100%;padding:6px;box-shadow:0 20px 60px rgba(0,0,0,.3);animation:fade .2s}
@@ -322,4 +337,7 @@ a{color:var(--blue)}
   .runner-body{padding:16px 15px}
   .runner-actions{padding:14px 15px}
   .detail-head h3{font-size:18px}
+  .snd-master{flex-direction:column;align-items:stretch;gap:10px}
+  .snd-volume{min-width:0}
+  .snd-cats{grid-template-columns:1fr}
 }

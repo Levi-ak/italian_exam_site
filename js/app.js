@@ -191,10 +191,21 @@
   /* ============================================================
    * 通用：初始化 & 事件委托
    * ============================================================ */
+  /* 音效便捷调用：集中生成在 sound.js，这里只在正确事件点触发（安全降级） */
+  function snd(name) { try { var S = window.Sound; if (S && typeof S[name] === "function") return S[name](); } catch (e) {} }
+
   document.addEventListener("click", function (ev) {
     var el = ev.target.closest("[data-act]");
     if (!el) return;
     var act = el.dataset.act;
+
+    // —— 音效分流：不同事件各触发且仅触发一次对应音 ——
+    if (act === "nav" || act === "kn-unit" || act === "home-know") { snd("playNavTick"); }
+    else if (act === "kn-open") { snd("playExplanationOpen"); }
+    else if (act === "expl-done") { handleExplDone(el); return; }   // 读完解析（不再走路由）
+    else if (act === "kn-check") { /* 勾选完成：成就音在 change 处理，不叠点击声 */ }
+    else if (act === "mini" || act === "submit" || act === "submit-preview") { /* 判分音在各自流程内播放 */ }
+    else { snd("playClick"); }                                        // 其余按钮：轻微点击声
 
     // 导航
     if (act === "nav") { navTo(el.dataset.view); return; }
@@ -227,10 +238,17 @@
   });
 
   document.addEventListener("change", function (ev) {
+    // 音效：选择题选中选项 → 柔和选中提示（不代表判分）
+    var tgt = ev.target;
+    if (tgt && tgt.name === "ps-answer") { snd("playSelection"); return; }
+
     var el = ev.target.closest("[data-act]");
     if (!el) return;
     if (el.dataset.act === "kn-check") {
+      var wasDone = Progress.isTopicDone(el.dataset.t);   // 记录变更前状态
       Progress.setTopicDone(el.dataset.t, el.checked);
+      // 音效：仅在“未完成 → 已完成”这一刻播成就音；重绘不会重播（change 只由用户触发）
+      if (el.checked && !wasDone) snd("playTopicComplete");
       var item = el.closest(".topic-item");
       if (item) item.classList.toggle("done", el.checked);
     }
@@ -246,6 +264,8 @@
     var opts = mp.options || [];
     var chosen = opts[optIdx];
     var correct = Grading.matchAny(chosen, [answer]).correct;
+    // 音效：小练习即时判分，对/错各一次（不再叠加其它音）
+    if (correct) snd("playCorrect"); else snd("playIncorrect");
     var fb = wrap.querySelector(".mini-fb");
     $all(".mini-opt", wrap).forEach(function (b, i) {
       b.classList.toggle("right", Grading.matchAny(opts[i], [answer]).correct);
@@ -257,6 +277,15 @@
       : "✗ 不正确。正确答案：<strong>" + esc(answer) + "</strong><div class='mini-expl'>" + esc(mp.explain || "") + "</div>";
     var ansBox = wrap.querySelector(".mini-answer");
     if (ansBox) ansBox.classList.remove("hidden");
+  }
+  /* “已读完解析”：真实的讲解完成动作。仅标记本条解析已读并播完成音，
+     不会把整个知识主题标记为完成（那是 kn-check 的职责）。 */
+  function handleExplDone(btn) {
+    if (btn.disabled) return;            // 防重复触发
+    btn.disabled = true;
+    btn.classList.add("used");
+    btn.textContent = "✓ 已读完解析";
+    snd("playExplanationComplete");
   }
   function findMini(idx) {
     var t = TOPIC_BY_ID[currentTopicId] ? TOPIC_BY_ID[currentTopicId].topic : null;
