@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>意语备考复习站 · Espresso 1 (Unit 1–3)</title>
+<meta name="description" content="基于 Espresso 1 New Edition 三个单元 PDF 的意语备考复习与练习网站（中文界面）。">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">IT</span>
+    <div class="brand-text">
+      <strong>意语备考复习站</strong>
+      <small>Espresso 1 · Unit 1–3 · Primi contatti / Io e gli altri / Buon appetito</small>
+    </div>
+  </div>
+  <nav class="mainnav">
+    <button class="nav-btn active" data-act="nav" data-view="home">首页</button>
+    <button class="nav-btn" data-act="nav" data-view="knowledge">模块 A · 知识复习</button>
+    <button class="nav-btn" data-act="nav" data-view="practice">模块 B · 练习 / 模考</button>
+    <button class="nav-btn" data-act="nav" data-view="progress">我的进度</button>
+  </nav>
+  <button class="menu-btn" id="menu-btn" aria-label="菜单">☰</button>
+</header>
+
+<main class="container">
+
+  <!-- ============ 首页 ============ -->
+  <section id="view-home" class="view active">
+    <div class="hero">
+      <h1>把三份课程 PDF 变成可复习、可练习的备考站</h1>
+      <p>本课程内容全部取自 <strong>UNITA1_NE1.pdf / UNITA2_NE1.pdf / UNITA3_NE1.pdf</strong>（Espresso 1 New Edition 第一册第 1–3 课）。界面为中文，意语原文保留并附中文讲解。所有进度保存在你的浏览器本地，无需登录。</p>
+      <div class="hero-actions">
+        <button class="btn primary big" data-act="nav" data-view="knowledge">开始知识复习</button>
+        <button class="btn big" data-act="nav" data-view="practice">去做练习</button>
+      </div>
+      <div class="source-note">⚠️ 三份 PDF 均为扫描图像，无文本层。内容已通过逐页读取核对（详见 README 的“提取说明与已知问题”）。</div>
+    </div>
+    <div id="home-stats"></div>
+    <h2 class="section-h">三个单元</h2>
+    <div id="home-units"></div>
+  </section>
+
+  <!-- ============ 模块 A：知识复习 ============ -->
+  <section id="view-knowledge" class="view">
+    <div class="kn-top">
+      <div id="kn-unit-tabs" class="tab-row"></div>
+      <div id="kn-unit-meta"></div>
+    </div>
+    <div class="kn-grid">
+      <aside class="kn-list">
+        <div class="kn-list-title">主题目录 <span class="muted">（勾选=已完成）</span></div>
+        <div id="kn-topic-list"></div>
+      </aside>
+      <div id="kn-topic-detail" class="kn-detail"></div>
+    </div>
+  </section>
+
+  <!-- ============ 模块 B：练习 / 模考 ============ -->
+  <section id="view-practice" class="view">
+    <div id="practice-body"></div>
+  </section>
+
+  <!-- ============ 我的进度 ============ -->
+  <section id="view-progress" class="view">
+    <div id="progress-body"></div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <p>课程内容来源：Espresso 1 New Edition（Alma Edizioni）Unit 1–3 · 仅供个人备考复习使用。</p>
+</footer>
+
+<!-- 数据与逻辑（顺序固定） -->
+<script src="js/content-data.js"></script>
+<script src="js/grading.js"></script>
+<script src="js/progress.js"></script>
+<script src="js/content-u1.js"></script>
+<script src="js/content-u2.js"></script>
+<script src="js/content-u3.js"></script>
+<script src="js/questions-u1.js"></script>
+<script src="js/questions-u2.js"></script>
+<script src="js/questions-u3.js"></script>
+<script src="js/app.js"></script>
+<script src="js/practice.js"></script>
+</body>
+</html>
