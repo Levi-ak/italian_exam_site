@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>音效系统自动化测试 · 意语备考复习站</title>
+<style>
+  body{font-family:"Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+       background:#f4f6fa;color:#1f2430;margin:0;padding:30px;line-height:1.6}
+  .wrap{max-width:860px;margin:0 auto}
+  h1{font-size:22px}
+  .sum{font-size:18px;font-weight:700;padding:14px 18px;border-radius:12px;margin-bottom:18px}
+  .sum.ok{background:#e7f6ec;color:#27823a;border:1px solid #bfe8ca}
+  .sum.bad{background:#ffe3e3;color:#c92a2a;border:1px solid #ffc9c9}
+  .t{display:flex;gap:12px;align-items:flex-start;background:#fff;border:1px solid #e6e9f0;
+     border-radius:10px;padding:10px 14px;margin-bottom:8px}
+  .t .mark{font-weight:800;min-width:22px}
+  .t.pass .mark{color:#27823a}
+  .t.fail{border-color:#ffc9c9;background:#fffafa}
+  .t.fail .mark{color:#c92a2a}
+  .t .name{font-weight:600}
+  .t .det{font-size:13px;color:#8a91a3}
+  .note{font-size:13px;color:#8a91a3;margin-top:20px}
+  code{background:#eef1f7;padding:1px 6px;border-radius:5px}
+</style>
+<!-- 先注入模拟 AudioContext（sound.js 懒创建时读取 window.AudioContext），再加载 sound.js。
+     这样测试完全不依赖真实扬声器/自动播放策略。 -->
+<script>
+  window.__osc = 0;
+  function MockAC(){ this.state = "running"; this.currentTime = 0; this.destination = {}; }
+  MockAC.prototype.createOscillator = function () {
+    window.__osc++;
+    return { frequency:{ value:440, setValueAtTime:function(){}, exponentialRampToValueAtTime:function(){} },
+             connect:function(){}, start:function(){}, stop:function(){} };
+  };
+  MockAC.prototype.createGain = function () {
+    return { gain:{ value:0, setValueAtTime:function(){}, exponentialRampToValueAtTime:function(){} }, connect:function(){} };
+  };
+  MockAC.prototype.resume = function () { return { catch:function(){} }; };
+  window.AudioContext = MockAC;
+  window.webkitAudioContext = MockAC;
+</script>
+<script src="../js/sound.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <h1>音效系统自动化测试</h1>
+  <div id="sum" class="sum">运行中…</div>
+  <div id="list"></div>
+  <p class="note">
+    本页在注入<strong>模拟 AudioContext</strong>（仅统计振荡器数量、不发声）的前提下加载
+    <code>js/sound.js</code>，对设置初始化 / 总开关 / 分组开关 / 音量 / 持久化 / 损坏回退 /
+    降级处理等逻辑逐条断言。不需要真实扬声器。与 <code>_work/validate.py</code> 用例一致。
+  </p>
+</div>
+
+<script>
+(function () {
+  var S = window.Sound;
+  var results = [];
+  var KEY = "ita_exam_sound_v1";
+  // 测试前快照：运行结束恢复，测试不在同源留下任何存储污染
+  var SNAP_SOUND = null;
+  try { SNAP_SOUND = localStorage.getItem(KEY); } catch (e) {}
+  function eq(name, got, want) {
+    var g = JSON.stringify(got), w = JSON.stringify(want);
+    results.push({ name: name, got: g, want: w, pass: g === w });
+  }
+  function withMock(fn, keepStorage) {
+    window.__osc = 0;
+    if (!keepStorage) { try { localStorage.removeItem(KEY); } catch (e) {} }
+    S.__reset();
+    return fn();
+  }
+
+  // 默认值
+  var d = withMock(function () { return S.getSettings(); });
+  eq("默认: 启用总开关", d.enabled, true);
+  eq("默认: 中等音量", d.volume, 0.55);
+  eq("默认: 五个分组全开", [d.ui, d.correct, d.incorrect, d.explanation, d.exam].join(","), "true,true,true,true,true");
+
+  // 启用时会发声（>0 振荡器）
+  var on = withMock(function () { var b = window.__osc; S.playCorrect(); return window.__osc - b; });
+  eq("启用时答对会发声", on > 0, true);
+
+  // 总开关关闭 → 全部静音
+  var off = withMock(function () {
+    S.setSetting("enabled", false); var b = window.__osc;
+    S.playClick(); S.playCorrect(); S.playIncorrect(); S.playNavTick(); S.playMockResults();
+    return window.__osc - b;
+  });
+  eq("总开关关闭→所有音效静音", off, 0);
+
+  // 分组独立
+  var cat = withMock(function () {
+    S.setSetting("correct", false); var b = window.__osc;
+    S.playCorrect(); var c = window.__osc - b;
+    S.playIncorrect(); var i = window.__osc - b - c;
+    S.playClick(); var ui = window.__osc - b - c - i;
+    return { c: c, i: i, ui: ui };
+  });
+  eq("关闭答对组→答对静音、答错与界面不受影响", (cat.c === 0 && cat.i > 0 && cat.ui > 0), true);
+
+  // 音量
+  var v0 = withMock(function () { S.setSetting("volume", 0); var b = window.__osc; S.playCorrect(); return window.__osc - b; });
+  eq("音量=0→无声", v0, 0);
+  var vchg = withMock(function () { S.setSetting("volume", 0.9); return S.getSettings().volume; });
+  eq("音量即时生效（无需刷新）", vchg, 0.9);
+  var vclamp = withMock(function () { S.setSetting("volume", 5); var hi = S.getSettings().volume; S.setSetting("volume", -3); var lo = S.getSettings().volume; return [hi, lo].join(","); });
+  eq("音量越界→夹取到 0..1", vclamp, "1,0");
+
+  // 持久化 + 模拟刷新重载
+  var persist = withMock(function () {
+    S.setSetting("incorrect", false); S.setSetting("volume", 0.3);
+    var raw = localStorage.getItem(KEY);
+    var parsed = raw ? JSON.parse(raw) : null;
+    S.__reset();
+    var s = S.getSettings();
+    return { stored: !!(parsed && parsed.incorrect === false && Math.abs(parsed.volume - 0.3) < 0.001),
+             reloaded: (s.incorrect === false && Math.abs(s.volume - 0.3) < 0.001) };
+  });
+  eq("设置持久化并在刷新后重载", (persist.stored && persist.reloaded), true);
+
+  // 损坏存储 → 回退默认
+  var corrupt = (function () {
+    try { localStorage.setItem(KEY, "{not json !!"); } catch (e) {}
+    S.__reset(); var s = S.getSettings(); var r = [s.enabled, s.volume].join(",");
+    try { localStorage.removeItem(KEY); } catch (e) {}
+    S.__reset(); return r;
+  })();
+  eq("损坏存储→安全回退默认", corrupt, "true,0.55");
+
+  // 非法类型 → 回退默认
+  var invalid = (function () {
+    try { localStorage.setItem(KEY, JSON.stringify({ enabled: "yes", volume: "loud", ui: 1 })); } catch (e) {}
+    S.__reset(); var s = S.getSettings(); var r = [s.enabled, typeof s.volume, s.ui].join(",");
+    try { localStorage.removeItem(KEY); } catch (e) {}
+    S.__reset(); return r;
+  })();
+  eq("非法类型值→回退默认", invalid, "true,number,true");
+
+  // 恢复默认
+  var rst = withMock(function () { S.setSetting("enabled", false); S.setSetting("volume", 0.1); S.resetSettings(); return S.getSettings(); });
+  eq("恢复默认→重新启用并中等音量", [rst.enabled, rst.volume].join(","), "true,0.55");
+
+  // 不支持 Web Audio → 优雅降级
+  var unsupported = (function () {
+    window.AudioContext = undefined; window.webkitAudioAudioContext = undefined; window.webkitAudioContext = undefined;
+    try { localStorage.removeItem(KEY); } catch (e) {}
+    S.__reset();
+    var threw = false, res = null;
+    try { res = S.playCorrect(); } catch (e) { threw = true; }
+    return { ok: (res === false && !threw) };
+  })();
+  eq("不支持 Web Audio→优雅降级不报错", unsupported.ok, true);
+
+  // canPlay 遵循总开关
+  var cp = withMock(function () { var a = S.canPlay("correct"); S.setSetting("enabled", false); var b = S.canPlay("correct"); return [a, b].join(","); });
+  eq("canPlay 遵循总开关", cp, "true,false");
+
+  // 渲染
+  var list = document.getElementById("list");
+  var passed = 0;
+  results.forEach(function (r) {
+    if (r.pass) passed++;
+    var el = document.createElement("div");
+    el.className = "t " + (r.pass ? "pass" : "fail");
+    el.innerHTML = '<span class="mark">' + (r.pass ? "✓" : "✗") + "</span>" +
+      '<div><div class="name">' + r.name + "</div>" +
+      (r.pass ? "" : '<div class="det">got=' + r.got + " want=" + r.want + "</div>") + "</div>";
+    list.appendChild(el);
+  });
+  // 还原测试前的存储状态（本页测试会把音效开关改来改去，结束必须恢复原值）
+  try {
+    if (SNAP_SOUND === null) localStorage.removeItem(KEY);
+    else localStorage.setItem(KEY, SNAP_SOUND);
+    S.__reset();
+  } catch (e) {}
+  var sum = document.getElementById("sum");
+  sum.className = "sum " + (passed === results.length ? "ok" : "bad");
+  sum.textContent = passed + " / " + results.length + " 通过" +
+    (passed === results.length ? " —— 音效系统逻辑正常 ✓" : " —— 存在失败用例 ✗");
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>发音系统自动化测试 · 意语备考复习站</title>
+<style>
+  body{font-family:"Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+       background:#f4f6fa;color:#1f2430;margin:0;padding:30px 20px;line-height:1.6}
+  .wrap{max-width:860px;margin:0 auto 26px;position:relative;z-index:5}
+  h1{font-size:22px}
+  .sum{font-size:18px;font-weight:700;padding:14px 18px;border-radius:12px;margin-bottom:18px}
+  .sum.ok{background:#e7f6ec;color:#27823a;border:1px solid #bfe8ca}
+  .sum.bad{background:#ffe3e3;color:#c92a2a;border:1px solid #ffc9c9}
+  .t{display:flex;gap:12px;align-items:flex-start;background:#fff;border:1px solid #e6e9f0;
+     border-radius:10px;padding:10px 14px;margin-bottom:8px}
+  .t .mark{font-weight:800;min-width:22px}
+  .t.pass .mark{color:#27823a}
+  .t.skip .mark{color:#8a91a3}
+  .t.fail{border-color:#ffc9c9;background:#fffafa}
+  .t.fail .mark{color:#c92a2a}
+  .t .name{font-weight:600}
+  .t .det{font-size:13px;color:#8a91a3}
+  .note{font-size:13px;color:#8a91a3;margin-top:20px}
+  code{background:#eef1f7;padding:1px 6px;border-radius:5px}
+</style>
+<!-- 站点样式（词条 / 朗读按钮 / 移动端规则的样式测试也读取它） -->
+<link rel="stylesheet" href="../css/style.css">
+<script>
+/* ============================================================
+ * 必须在任何站点脚本之前注入：
+ * 1) 错误捕获（最后一条测试“无控制台错误”读取）；
+ * 2) 模拟 AudioContext —— 只统计振荡器，不发声（同 test_sound.html）；
+ * 3) 模拟 speechSynthesis —— 记录朗读请求，不发声（本页核心）；
+ * 4) localStorage 三键快照 —— 发音功能不得改动音效键 / 进度键。
+ * ============================================================ */
+window.__errors = [];
+window.addEventListener("error", function (e) { window.__errors.push(String(e.message || e.error || "")); });
+window.addEventListener("unhandledrejection", function (e) { window.__errors.push("unhandledrejection: " + String(e.reason)); });
+(function () {
+  var oe = console.error;
+  console.error = function () {
+    try { window.__errors.push(Array.prototype.slice.call(arguments).join(" ")); } catch (e) {}
+    oe.apply(console, arguments);
+  };
+})();
+
+window.__osc = 0;
+function MockAC() { this.state = "running"; this.currentTime = 0; this.destination = {}; }
+MockAC.prototype.createOscillator = function () {
+  window.__osc++;
+  return { frequency: { value: 440, setValueAtTime: function () {}, exponentialRampToValueAtTime: function () {} },
+           connect: function () {}, start: function () {}, stop: function () {} };
+};
+MockAC.prototype.createGain = function () {
+  return { gain: { value: 0, setValueAtTime: function () {}, exponentialRampToValueAtTime: function () {} }, connect: function () {} };
+};
+MockAC.prototype.resume = function () { return { catch: function () {} }; };
+window.AudioContext = MockAC;
+window.webkitAudioContext = MockAC;
+
+window.__speakCount = window.__speakCount || 0;
+function MockUtterance(t) { this.text = String(t == null ? "" : t); }
+/* Chrome 中 window.speechSynthesis 为只读访问器：必须用 defineProperty 才能安装替身（直接赋值会失败/抛错） */
+try {
+  Object.defineProperty(window, "SpeechSynthesisUtterance", { value: MockUtterance, configurable: true, writable: true });
+} catch (e) { try { window.SpeechSynthesisUtterance = MockUtterance; } catch (e2) {} }
+function MockSynth() { this.queue = []; this.last = null; this.cancelled = 0; this._voices = []; }
+MockSynth.prototype.speak = function (u) { this.last = u; this.queue.push(u); window.__speakCount++; };
+MockSynth.prototype.cancel = function () { this.cancelled++; this.queue = []; };
+MockSynth.prototype.getVoices = function () { return this._voices; };
+MockSynth.prototype.addEventListener = function () {};
+MockSynth.prototype.removeEventListener = function () {};
+window.__mockSynth = new MockSynth();
+try {
+  Object.defineProperty(window, "speechSynthesis", { value: window.__mockSynth, configurable: true, writable: true });
+} catch (e) { try { window.speechSynthesis = window.__mockSynth; } catch (e2) {} }
+/* 自检行：若替身未安装成功，测试页会直接失败并给出原因 */
+window.__mockInstalled = (window.speechSynthesis === window.__mockSynth) && (window.SpeechSynthesisUtterance === MockUtterance);
+
+window.__snap = {
+  sound: localStorage.getItem("ita_exam_sound_v1"),
+  progress: localStorage.getItem("ita_exam_progress_v1"),
+  pron: localStorage.getItem("ita_exam_pron_v1")
+};
+</script>
+</head>
+<body>
+
+<div class="wrap">
+  <h1>发音系统自动化测试</h1>
+  <div id="sum" class="sum">运行中…</div>
+  <div id="list"></div>
+  <p class="note">
+    本页<strong>加载与正式站点完全相同的文件栈</strong>（content-data / grading / progress / sound /
+    pronunciation / 题库 / app / practice），但在加载前注入<strong>模拟 speechSynthesis</strong>（只记录朗读
+    请求、不出声）与<strong>模拟 AudioContext</strong>（只统计振荡器），因此可在无扬声器、无语音包的环境
+    确定性验证：语种 it-IT、语速、总开关、持久化与三键隔离、词条/整句/对话播放、答案不泄露、点击词条
+    不提交不选中不播音效、判分与音效回归、选中朗读、桌面与移动端样式。<br>
+    ⚠️ 朗读的<strong>实际听感</strong>（口音、语速是否自然）无法由本页自动验证，需在正式站人工试听。
+    与 <code>_work/validate.py</code> 用例互补（无头 50 例 + 本页 DOM 级用例）。
+  </p>
+</div>
+
+<!-- ===== 站点骨架（与 index.html 一致，供 app.js / practice.js 真实渲染） ===== -->
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">IT</span>
+    <div class="brand-text">
+      <strong>意语备考复习站</strong>
+      <small>Espresso 1 · Unit 1–3 · Primi contatti / Io e gli altri / Buon appetito</small>
+    </div>
+  </div>
+  <nav class="mainnav">
+    <button class="nav-btn active" data-act="nav" data-view="home">首页</button>
+    <button class="nav-btn" data-act="nav" data-view="knowledge">模块 A · 知识复习</button>
+    <button class="nav-btn" data-act="nav" data-view="practice">模块 B · 练习 / 模考</button>
+    <button class="nav-btn" data-act="nav" data-view="progress">我的进度</button>
+  </nav>
+  <button class="menu-btn" id="menu-btn" aria-label="菜单">☰</button>
+</header>
+
+<main class="container">
+  <section id="view-home" class="view active">
+    <div class="hero">
+      <h1>测试夹具 · 首页</h1>
+      <p>本页为发音系统自动化测试夹具，站点脚本在此真实运行。</p>
+      <div class="hero-actions">
+        <button class="btn primary big" data-act="nav" data-view="knowledge">开始知识复习</button>
+        <button class="btn big" data-act="nav" data-view="practice">去做练习</button>
+      </div>
+    </div>
+    <div id="home-stats"></div>
+    <h2 class="section-h">三个单元</h2>
+    <div id="home-units"></div>
+  </section>
+
+  <section id="view-knowledge" class="view">
+    <div class="kn-top">
+      <div id="kn-unit-tabs" class="tab-row"></div>
+      <div id="kn-unit-meta"></div>
+    </div>
+    <div class="kn-grid">
+      <aside class="kn-list">
+        <div class="kn-list-title">主题目录</div>
+        <div id="kn-topic-list"></div>
+      </aside>
+      <div id="kn-topic-detail" class="kn-detail"></div>
+    </div>
+  </section>
+
+  <section id="view-practice" class="view">
+    <div id="practice-body"></div>
+  </section>
+
+  <section id="view-progress" class="view">
+    <div id="progress-body"></div>
+  </section>
+</main>
+
+<footer class="footer">
+  <p>测试夹具 · 数据与逻辑加载顺序与 index.html 一致。</p>
+</footer>
+
+<!-- 数据与逻辑（顺序与 index.html 完全一致） -->
+<script src="../js/content-data.js"></script>
+<script src="../js/grading.js"></script>
+<script src="../js/progress.js"></script>
+<script src="../js/sound.js"></script>
+<script src="../js/pronunciation.js"></script>
+<script src="../js/content-u1.js"></script>
+<script src="../js/content-u2.js"></script>
+<script src="../js/content-u3.js"></script>
+<script src="../js/questions-u1.js"></script>
+<script src="../js/questions-u2.js"></script>
+<script src="../js/questions-u3.js"></script>
+<script src="../js/app.js"></script>
+<script src="../js/practice.js"></script>
+
+<script>
+(async function () {
+  var P = window.Pron;
+  var mock = window.__mockSynth;
+  var KEY = "ita_exam_pron_v1";
+  var results = [];
+
+  function eq(name, got, want) {
+    var g = JSON.stringify(got), w = JSON.stringify(want);
+    results.push({ name: name, got: g, want: w, pass: g === w });
+  }
+  function eqSkip(name, note) {
+    results.push({ name: name, got: note, want: "跳过", pass: true, skip: true });
+  }
+  function eqThrow(name, e) {
+    results.push({ name: name, got: String(e && e.message || e), want: "无异常", pass: false });
+  }
+  function endLast() { var u = mock.last; if (u && u.onend) u.onend(); return u; }
+  function delay(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function fakeEl() {
+    var set = {};
+    return { _set: set, classList: {
+      add: function (c) { set[c] = 1; }, remove: function (c) { delete set[c]; },
+      toggle: function (c, v) { if (v) set[c] = 1; else delete set[c]; },
+      contains: function (c) { return !!set[c]; }
+    } };
+  }
+  function setVoices(v) { mock._voices = v; P.__setSynth(mock); }
+  function setUtter(fn) {
+    try { Object.defineProperty(window, "SpeechSynthesisUtterance", { value: fn, configurable: true, writable: true }); }
+    catch (e) { try { window.SpeechSynthesisUtterance = fn; } catch (e2) {} }
+  }
+  var IT = [
+    { name: "Google italiano", lang: "it-IT", voiceURI: "uri-it1" },
+    { name: "Microsoft Elsa", lang: "it", voiceURI: "uri-it2" },
+    { name: "Google US English", lang: "en-US", voiceURI: "uri-en" }
+  ];
+  function renderOne(q, timing) {
+    window.__app.setSession({
+      questions: [q], index: 0, answers: [], timing: timing || "immediate",
+      mode: "unit", startedAt: Date.now(), timeLimit: 0, deadline: 0
+    });
+    window.__practice._renderQuestion();
+  }
+  function restore(key, val) {
+    try { if (val === null || val === undefined) localStorage.removeItem(key); else localStorage.setItem(key, val); } catch (e) {}
+  }
+
+  var mcqQ = null, dlgQ = null;
+  QUESTIONS.forEach(function (q) {
+    // 样例选择题必须题干与至少一个选项含意大利语（拉丁字母），否则词条断言无对象可点
+    if (!mcqQ && q.type === "mcq" && /[A-Za-zÀ-ÿ]/.test(q.question) &&
+        (q.options || []).some(function (o) { return /[A-Za-zÀ-ÿ]/.test(o); })) mcqQ = q;
+    if (!dlgQ && q.type === "dialogue" && q.blanks && q.blanks.length) dlgQ = q;
+  });
+
+  var S = [];
+  function step(name, fn) { S.push({ name: name, fn: fn }); }
+
+  /* ---------- 起始状态：发音键清零、内置意大利语语音 ---------- */
+  step("起始状态准备", function () {
+    eq("模拟 speechSynthesis 已安装（本页测试不出声）", window.__mockInstalled, true);
+    try { localStorage.removeItem(KEY); } catch (e) {}
+    P.__reset();
+    setVoices(IT);
+    eq("样例选择题题干/选项含意大利语（词条断言有对象）", !!(mcqQ && /[A-Za-zÀ-ÿ]/.test(mcqQ.question)), true);
+    eq("样例对话题存在", !!dlgQ, true);
+  });
+
+  step("加载与初始化不自动朗读", function () {
+    eq("页面加载/渲染零自动播放（speak=0）", window.__speakCount, 0);
+    var d = P.getSettings();
+    eq("默认: 开启 / 语速 0.9 / 非慢速", [d.enabled, d.rate, d.slow].join(","), "true,0.9,false");
+    eq("语音列表仅意大利语（过滤 en）",
+       P.getAvailableItalianVoices().map(function (v) { return v.voiceURI; }).join(","), "uri-it1,uri-it2");
+  });
+
+  step("朗读请求：it-IT + 意大利语语音 + 语速 + 音量", function () {
+    mock.queue = [];
+    var ok = P.speak("Buongiorno!", "word", null);
+    var u = mock.queue[mock.queue.length - 1];
+    eq("speak 成功", ok, true);
+    eq("语种 it-IT", u.lang, "it-IT");
+    eq("选中意大利语语音", u.voice && u.voice.voiceURI, "uri-it1");
+    eq("默认语速 0.9 生效", u.rate, 0.9);
+    eq("朗读音量恒为 1（与音效音量互相独立）", u.volume, 1);
+  });
+
+  step("语速调节与越界夹取", function () {
+    P.setSetting("rate", 9);
+    eq("语速越界 → 夹取到 1.2", P.getSettings().rate, 1.2);
+    P.setSetting("rate", 0.75);
+    mock.queue = []; P.speak("Ciao", "word", null);
+    eq("语速 0.75 即时生效（无需刷新）", mock.queue[mock.queue.length - 1].rate, 0.75);
+    P.setSetting("rate", 0.9);
+  });
+
+  step("慢速朗读 0.65×", function () {
+    P.setSetting("slow", true);
+    mock.queue = []; P.speak("Ciao", "word", null);
+    eq("慢速模式 → 0.65", mock.queue[mock.queue.length - 1].rate, 0.65);
+    P.setSetting("slow", false);
+  });
+
+  step("总开关关闭拒绝朗读", function () {
+    P.setSetting("enabled", false);
+    mock.queue = [];
+    var res = P.speak("Ciao", "word", null);
+    eq("总开关关闭 → 返回 false", res, false);
+    eq("总开关关闭 → 无语音请求", mock.queue.length, 0);
+    P.setSetting("enabled", true);
+  });
+
+  step("不叠加朗读（先取消旧句）", function () {
+    mock.queue = []; mock.cancelled = 0;
+    P.speak("Prima", "word", null);
+    var n1 = mock.queue.length;
+    P.speak("Seconda", "word", null);
+    eq("连续朗读 = 先 cancel 再播新句（不重叠）",
+       (mock.cancelled >= 1 && n1 === 1 && mock.queue.length === 1 && mock.last.text === "Seconda"), true);
+  });
+
+  step("停止播放", function () {
+    P.speak("Ferma", "word", null);
+    P.stop();
+    eq("stop → 已取消且回到空闲", (mock.cancelled >= 2 && P.__state().pending === false), true);
+  });
+
+  step("播放指示器出现与清除", function () {
+    var el1 = fakeEl();
+    mock.queue = [];
+    P.speak("Indicatore", "word", el1);
+    eq("朗读中显示指示", !!el1._set.speaking, true);
+    endLast();
+    eq("播放结束清除指示", !!el1._set.speaking, false);
+  });
+
+  step("看门狗：浏览器无 onend/onerror 时指示约6秒自清", async function () {
+    var elW = fakeEl();
+    mock.queue = [];
+    P.speak("Saluti", "word", elW);
+    eq("静默环境仍发起朗读", mock.queue.length, 1);
+    eq("看门狗触发前指示在显示", !!elW._set.speaking, true);
+    // 看门狗 = max(6000ms, 文本长×200)；轮询等待以容忍后台标签页定时器节流
+    var t0 = Date.now();
+    while (elW._set.speaking && Date.now() - t0 < 12000) await delay(250);
+    eq("看门狗自动清除指示（无残留）", !!elW._set.speaking, false);
+    eq("看门狗后回到空闲", P.__state().pending, false);
+  });
+
+  step("真实渲染题目仍不自动朗读", function () {
+    var c0 = window.__speakCount;
+    renderOne(mcqQ, "immediate");
+    eq("渲染题目后 speak 增量为 0", window.__speakCount - c0, 0);
+    eq("题干含可点击词条", !!document.querySelector("#practice-body .q-text .itw"), true);
+    eq("题干旁有朗读题干按钮", !!document.querySelector("#practice-body .q-text .say-btn"), true);
+  });
+
+  step("点击选项内词条：朗读但不选中/不播音效/不冒泡", function () {
+    var word = document.querySelector("#practice-body .option .itw");
+    eq("选项内存在可点击词条", !!word, true);
+    if (!word) return;
+    var labelEl = word.closest("label");
+    var input = labelEl ? labelEl.querySelector("input") : null;
+    var bubble = false;
+    function onBubble(e) { if (e.target === word || word.contains(e.target)) bubble = true; }
+    document.addEventListener("click", onBubble);
+    var oscB = window.__osc;
+    word.click();
+    document.removeEventListener("click", onBubble);
+    eq("词条点击 → 朗读该词本身", mock.last && mock.last.text, word.getAttribute("data-say"));
+    eq("词条点击 → 不选中选项", input ? input.checked : null, false);
+    eq("词条点击 → 不触发任何音效", window.__osc - oscB, 0);
+    eq("词条点击 → 事件被阻止冒泡（app 层收不到）", bubble, false);
+    var notPrevented = word.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    eq("词条点击 → 默认行为被阻止（label 不激活、不提交）", notPrevented, false);
+    eq("再次朗读仍是该词本身", mock.last && mock.last.text, word.getAttribute("data-say"));
+  });
+
+  step("点击选项其他区域：正常选中（既有行为不回归）", function () {
+    var opts = document.querySelectorAll("#practice-body .options .option");
+    if (!opts.length) { eq("存在选项", false, true); return; }
+    // 防御：同源可能被其它测试页留下“音效关闭”的存储 → 断言前确保开启（页尾会按快照恢复）
+    if (!window.Sound.getSettings().enabled) window.Sound.setSetting("enabled", true);
+    var oscB = window.__osc;
+    opts[0].click();
+    var inp = opts[0].querySelector("input");
+    eq("点选项标签 → 正常选中", inp.checked, true);
+    eq("选中选项仍有选中提示音（音效未被发音功能破坏）", window.__osc > oscB, true);
+  });
+
+  step("朗读题干按钮：混排只读意大利语", function () {
+    var btn = document.querySelector("#practice-body .q-text .say-btn");
+    if (!btn) { eq("题干朗读按钮存在", false, true); return; }
+    var qText = mcqQ.question;
+    mock.queue = [];
+    btn.click();
+    eq("题干按钮触发朗读", mock.queue.length, 1);
+    eq("朗读文本 = sentenceText(题干)", mock.last && mock.last.text, P.sentenceText(qText));
+    eq("朗读文本不含中文（绝不读界面语言）", /[\u4e00-\u9fff]/.test(mock.last ? mock.last.text : ""), false);
+  });
+
+  step("文本渲染助手（词条/按钮/抽取）", function () {
+    var h = P.it("L'amica di Lucia è italiana.");
+    eq("撇号词成词条", h.indexOf('data-say="L&#39;amica"') >= 0, true);
+    eq("重音词成词条", h.indexOf('data-say="è"') >= 0, true);
+    eq("纯中文不生成词条", P.it("选择正确答案").indexOf("data-say"), -1);
+    var mixed = P.it("她的名字是 amica");
+    eq("中意混合：中文原样 + 意词成词条",
+       mixed.indexOf("她的名字是") >= 0 && mixed.indexOf('data-say="amica"') >= 0, true);
+    var b = P.sayBtn("Come stai?", "sentence", "朗读题干");
+    eq("整句按钮含 mode 与 aria-label",
+       b.indexOf("<button") === 0 && b.indexOf('data-say-mode="sentence"') >= 0 && b.indexOf('aria-label="朗读题干"') >= 0, true);
+    eq("填充模板朗读跳过占位符", P.templateSpokenText("Io [blank0] studente."), "Io studente.");
+    eq("占位删除后孤立逗号被收拾", P.templateSpokenText("Il mio indirizzo è Via Garibaldi, [blank0]."), "Il mio indirizzo è Via Garibaldi.");
+    eq("纯意整句原样保留标点", P.sentenceText("Buongiorno, professore!"), "Buongiorno, professore!");
+    eq("纯中文 → 无可读文本", P.sentenceText("选择正确答案"), "");
+    eq("选区纯中文 → 不朗读", P.latinFromSelection("选择正确答案"), "");
+    eq("选区混排 → 只取拉丁片段", P.latinFromSelection("答案是 Ciao amico 好"), "Ciao amico");
+    eq("未知对话 key → 安全返回 false", P.playDialogue("nope", {}), false);
+    eq("无选区朗读选中内容 → 安全返回 false", P.speakSelectedText(), false);
+  });
+
+  step("设置持久化与三键隔离", function () {
+    P.setSetting("rate", 1.1);
+    var raw = localStorage.getItem(KEY);
+    var parsed = raw ? JSON.parse(raw) : null;
+    eq("发音设置写入独立键 ita_exam_pron_v1", !!(parsed && Math.abs(parsed.rate - 1.1) < 1e-9), true);
+    eq("未改动音效键 ita_exam_sound_v1", localStorage.getItem("ita_exam_sound_v1"), window.__snap.sound);
+    eq("未改动进度键 ita_exam_progress_v1", localStorage.getItem("ita_exam_progress_v1"), window.__snap.progress);
+    P.__reset();
+    eq("模拟刷新后重载语速", P.getSettings().rate, 1.1);
+    try { localStorage.setItem(KEY, "{not json !!"); } catch (e) {}
+    P.__reset();
+    eq("损坏存储 → 安全回退默认", P.getSettings().rate, 0.9);
+    P.setSetting("rate", 0.7); P.setSetting("slow", true); P.setSetting("enabled", false);
+    P.resetSettings();
+    var rs = P.getSettings();
+    eq("恢复默认 → 0.9 / 非慢速 / 开启", [rs.rate, rs.slow, rs.enabled].join(","), "0.9,false,true");
+  });
+
+  step("浏览器不支持语音合成时优雅降级", function () {
+    var su = window.SpeechSynthesisUtterance;
+    var threw = false, res = null;
+    try {
+      setUtter(undefined);                       // 模拟不支持：必须放在 try 内，保证异常也能恢复
+      try { res = P.speak("Ciao", "word", null); } catch (e) { threw = true; }
+      eq("不支持 → 不抛错且返回 false", (res === false && !threw), true);
+      eq("supported() 如实为 false", P.supported(), false);
+    } finally {
+      setUtter(su);                              // 无论如何恢复
+    }
+    eq("恢复后 supported() 为 true", P.supported(), true);
+  });
+
+  step("无意大利语语音仍按 it-IT 尝试（不静默换语言）", function () {
+    setVoices([{ name: "English", lang: "en-US", voiceURI: "uri-en" }]);
+    eq("无意大利语语音 → 列表为空", P.getAvailableItalianVoices().length, 0);
+    mock.queue = [];
+    var res = P.speak("Ciao", "word", null);
+    eq("仍尝试按意大利语朗读", (res === true && mock.queue.length === 1 && mock.queue[0].lang === "it-IT"), true);
+    eq("无语音时不硬指派 voice", mock.queue[0].voice, undefined);
+    setVoices(IT);
+  });
+
+  step("进度页发音设置面板", function () {
+    window.__practice.renderProgress();
+    var panel = document.querySelector("#progress-body .pron-panel");
+    eq("进度页出现发音设置面板", !!panel, true);
+    if (!panel) return;
+    eq("面板含总开关/语速/语音/试听/检测/停止/恢复",
+       ["enabled", "rate", "voice", "test", "check", "stop", "reset"].every(function (k) {
+         return !!panel.querySelector('[data-pron="' + k + '"]');
+       }), true);
+    eq("面板如实报告意大利语语音状态",
+       panel.innerHTML.indexOf("未检测到意大利语语音") >= 0 || panel.innerHTML.indexOf("已检测到") >= 0, true);
+
+    var en = panel.querySelector('input[data-pron="enabled"]');
+    en.checked = false;
+    en.dispatchEvent(new Event("change", { bubbles: true }));
+    eq("面板关总开关 → 设置立即生效", P.getSettings().enabled, false);
+    en.checked = true;
+    en.dispatchEvent(new Event("change", { bubbles: true }));
+
+    var rate = panel.querySelector('input[data-pron="rate"]');
+    rate.value = "110";
+    rate.dispatchEvent(new Event("input", { bubbles: true }));
+    eq("语速滑杆 1.1 → 持久化", P.getSettings().rate, 1.1);
+    eq("面板操作仍未改动音效键", localStorage.getItem("ita_exam_sound_v1"), window.__snap.sound);
+
+    var rst = panel.querySelector('button[data-pron="reset"]');
+    eq("恢复默认按钮存在", !!rst, true);
+    rst.click();
+    eq("面板恢复默认 → 0.9", P.getSettings().rate, 0.9);
+  });
+
+  step("对话题渲染：按钮齐全且答案不泄露", function () {
+    renderOne(dlgQ, "immediate");
+    var body = document.getElementById("practice-body").innerHTML;
+    eq("完整对话按钮存在", !!document.querySelector("#practice-body .dlg-tools .dlg-say"), true);
+    eq("逐句播放按钮存在", document.querySelectorAll("#practice-body .turn .say-btn").length > 0, true);
+    eq("题目 DOM 不含“含答案”按钮（不提前泄露）", body.indexOf("data-say-dlg-done"), -1);
+    eq("题目 DOM 不含空格答案文本（按需校验时才出现）", /data-say-dlg-done/.test(body), false);
+  });
+
+  step("完整对话逐行播放与停止（异步）", async function () {
+    var btn = document.querySelector("#practice-body .dlg-tools .dlg-say");
+    var nonBlank = dlgQ.turns.filter(function (t) { return !t.blank; });
+    mock.queue = [];
+    btn.click();
+    eq("点完整对话按钮 → 先播第 1 行", mock.queue.length, 1);
+    eq("第 1 行文本正确", mock.last && mock.last.text, nonBlank[0].text);
+    eq("播放中显示指示", document.querySelectorAll("#practice-body .speaking").length > 0, true);
+    endLast();
+    await delay(400);                      // 行间 320ms 延时（真实定时器）
+    eq("延时后按顺序播第 2 行", mock.queue.length, Math.min(2, nonBlank.length));
+    eq("第 2 行文本正确", mock.last && mock.last.text, nonBlank[1].text);
+    P.stop();
+    var n = mock.queue.length;
+    var lastU = mock.last;
+    if (lastU && lastU.onend) lastU.onend();   // 迟到回调
+    await delay(400);
+    eq("停止后不再续播", mock.queue.length, n);
+    eq("停止后指示器全部清除（无残留高亮）", document.querySelectorAll("#practice-body .speaking").length, 0);
+    eq("停止后回到空闲", P.__state().pending, false);
+  });
+
+  step("立即模式：判分/反馈/答对音不回归", function () {
+    renderOne(mcqQ, "immediate");
+    var opts = document.querySelectorAll("#practice-body .options .option");
+    opts[mcqQ.answerIndex].click();                     // 选中正确项（点标签非词条）
+    var oscB = window.__osc;
+    document.getElementById("btn-submit").click();      // app.js 委托 → submitCurrent
+    var sess = window.__app.getSession();
+    eq("判分正确记录", sess.answers[0] && sess.answers[0].correct, true);
+    eq("反馈面板出现", !!document.querySelector("#q-feedback .fb"), true);
+    eq("答对音播放（音效链路完好）", window.__osc > oscB, true);
+  });
+
+  step("延迟模式：提交后不泄露对错、不播对错音", function () {
+    renderOne(mcqQ, "deferred");
+    var opts = document.querySelectorAll("#practice-body .options .option");
+    opts[mcqQ.answerIndex].click();
+    var oscB = window.__osc;
+    document.getElementById("btn-submit").click();
+    var fb = document.getElementById("q-feedback");
+    var txt = fb.textContent || "";
+    eq("延迟模式显示中性提示", !!fb.querySelector(".fb-neutral"), true);
+    eq("不出现对错判定文字",
+       txt.indexOf("回答正确") < 0 && txt.indexOf("回答错误") < 0 && txt.indexOf("正确答案") < 0, true);
+    eq("延迟模式判分音不提前播放", window.__osc - oscB, 0);
+  });
+
+  step("结果页：对话题提供“含答案”完整对话按钮", function () {
+    var rec = {
+      qid: dlgQ.id, unit: dlgQ.unit, type: "dialogue", importance: dlgQ.importance,
+      userAnswer: "…", correctAnswer: dlgQ.answerDisplay || "", correct: false,
+      explanation: dlgQ.explanation, knowledgePoint: dlgQ.knowledgePoint
+    };
+    window.__app.setSession({
+      questions: [dlgQ], index: 0, answers: [rec], timing: "deferred",
+      mode: "unit", startedAt: Date.now(), timeLimit: 0, deadline: 0
+    });
+    window.__practice.renderResults();
+    var doneBtn = document.querySelector('#practice-body .rev-item [data-say-dlg-done="1"]');
+    eq("结果页出现“含答案”完整对话按钮", !!doneBtn, true);
+    eq("结果页题干/答案带词条", document.querySelectorAll("#practice-body .rev-item .itw").length > 0, true);
+  });
+
+  step("选中意大利语文本 → 朗读选中内容（异步）", async function () {
+    window.__app.showView("practice");                 // 显示视口，选区矩形才非零
+    renderOne(mcqQ, "immediate");
+    var span = document.querySelector("#practice-body .q-text .itw");
+    if (!span) { eq("存在可选词条", false, true); return; }
+    var range = document.createRange();
+    range.selectNodeContents(span);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    span.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    await delay(80);
+    var selBtn = document.getElementById("pron-sel-btn");
+    eq("选中意大利语后出现“朗读选中内容”按钮", !!(selBtn && selBtn.classList.contains("show")), true);
+    if (selBtn) {
+      mock.queue = [];
+      selBtn.click();
+      eq("朗读选中内容 = 选中的意大利语", mock.last && mock.last.text, span.textContent);
+      eq("选中朗读不读中文（本例为纯意词）", /[\u4e00-\u9fff]/.test(mock.last ? mock.last.text : ""), false);
+    }
+    sel.removeAllRanges();
+    P.stop();
+  });
+
+  step("样式：桌面词条按钮 + 移动端 680px 规则", function () {
+    var rules = null;
+    try {
+      rules = [];
+      var sheets = document.styleSheets;
+      for (var i = 0; i < sheets.length; i++) {
+        var rs;
+        try { rs = sheets[i].cssRules || sheets[i].rules; } catch (e) { rules = null; break; }
+        if (!rs) { rules = null; break; }
+        for (var j = 0; j < rs.length; j++) rules.push(rs[j].cssText || "");
+      }
+    } catch (e) { rules = null; }
+    if (!rules) { eqSkip("样式规则检查（浏览器限制 cssRules 读取时跳过）", "file:// 环境可能受限"); return; }
+    var all = rules.join("\n");
+    eq("桌面样式含词条 .itw 与朗读按钮 .say-btn",
+       all.indexOf(".itw") >= 0 && all.indexOf(".say-btn") >= 0, true);
+    var mobile = rules.filter(function (t) { return /max-width:\s*680/.test(t); }).join("\n");
+    eq("移动端 ≤680px 含发音控件规则",
+       /\.sel-say|\.say-btn|\.itw|\.dlg-tools/.test(mobile), true);
+  });
+
+  step("全程无控制台错误", function () {
+    eq("无未捕获异常/控制台错误", window.__errors.slice(0, 5), []);
+  });
+
+  /* ---------- 运行 ---------- */
+  function renderRows() {
+    var list = document.getElementById("list");
+    list.innerHTML = "";
+    var passed = 0, skipped = 0;
+    results.forEach(function (r) {
+      if (r.pass) passed++;
+      if (r.skip) skipped++;
+      var el = document.createElement("div");
+      el.className = "t " + (r.pass ? (r.skip ? "skip" : "pass") : "fail");
+      el.innerHTML = '<span class="mark">' + (r.pass ? (r.skip ? "—" : "✓") : "✗") + "</span>" +
+        '<div><div class="name">' + r.name + "</div>" +
+        (r.pass ? "" : '<div class="det">got=' + r.got + " want=" + r.want + "</div>") + "</div>";
+      list.appendChild(el);
+    });
+    var sum = document.getElementById("sum");
+    sum.className = "sum " + (passed === results.length ? "ok" : "bad");
+    sum.textContent = passed + " / " + results.length + " 通过" +
+      (skipped ? "（含跳过 " + skipped + "）" : "") +
+      (passed === results.length ? " —— 发音系统逻辑与集成正常 ✓" : " —— 存在失败用例 ✗");
+  }
+
+  async function run() {
+    for (var i = 0; i < S.length; i++) {
+      try { await S[i].fn(); } catch (e) { eqThrow(S[i].name + "（执行异常）", e); }
+      renderRows();
+    }
+    // 收尾：停止朗读，恢复三键到测试前状态（测试不污染真实数据）
+    try { P.stop(); } catch (e) {}
+    restore(KEY, window.__snap.pron);
+    restore("ita_exam_sound_v1", window.__snap.sound);
+    restore("ita_exam_progress_v1", window.__snap.progress);
+    window.__runDone = true;   // 外部读取键状态请等待此标志，避免读到收尾前的瞬时值
+    renderRows();
+  }
+
+  document.addEventListener("DOMContentLoaded", function () { setTimeout(run, 0); });
+})();
+</script>
+</body>
+</html>

@@ -13,6 +13,21 @@
   /* 音效便捷调用：集中生成在 sound.js，这里只在正确事件点触发（安全降级） */
   function snd(name) { try { var S = window.Sound; if (S && typeof S[name] === "function") return S[name](); } catch (e) {} }
 
+  /* 发音渲染助手：集中于 pronunciation.js（安全降级为普通转义） */
+  function it(s) { try { if (window.Pron && window.Pron.it) return window.Pron.it(s); } catch (e) {} return esc(s); }
+  function sayBtn(text, mode, label) {
+    try { if (window.Pron && window.Pron.sayBtn) return window.Pron.sayBtn(text, mode, label); } catch (e) {}
+    return "";
+  }
+  function dlgBtn(key, label, useAnswers) {
+    try { if (window.Pron && window.Pron.dialogueBtn) return window.Pron.dialogueBtn(key, label, useAnswers); } catch (e) {}
+    return "";
+  }
+  function regDlg(lines, answers) {
+    try { if (window.Pron && window.Pron.registerDialogue) return window.Pron.registerDialogue(lines, answers); } catch (e) {}
+    return "";
+  }
+
   var TYPE_LABEL = { mcq: "选择题", fill: "填空题", dialogue: "对话补全" };
   var IMP_LABEL = { essential: "必背", important: "重要", supporting: "辅助" };
 
@@ -229,7 +244,7 @@
 
     var body = '<div class="runner-body">' +
       (topicName ? '<div class="q-topic">知识点：' + esc(topicName) + "</div>" : "") +
-      '<div class="q-text">' + esc(q.question) + "</div>" +
+      '<div class="q-text">' + it(q.question) + sayBtn(q.question, "sentence", "朗读题干") + "</div>" +
       questionBody(q) +
       "</div>";
 
@@ -249,7 +264,7 @@
       return '<div class="options">' + q.options.map(function (o, i) {
         var letter = "ABCD"[i];
         return '<label class="option"><input type="radio" name="ps-answer" value="' + i + '">' +
-          '<span class="opt-letter">' + letter + '</span><span class="opt-text">' + esc(o) + "</span></label>";
+          '<span class="opt-letter">' + letter + '</span><span class="opt-text">' + it(o) + "</span></label>";
       }).join("") + "</div>";
     }
     if (q.type === "fill") return fillHtml(q);
@@ -261,21 +276,33 @@
     var out = "", bi = 0;
     for (var i = 0; i < parts.length; i++) {
       if (/^blank\d+$/.test(parts[i])) { out += '<input class="blank-input" name="ps-blank" autocomplete="off" spellcheck="false" placeholder="输入意大利语">'; bi++; }
-      else out += esc(parts[i]);
+      else out += it(parts[i]);
     }
-    return '<div class="q-fill">' + out + "</div>";
+    // 整句朗读只读已有意大利语文字，跳过占位空格（不读 placeholder）
+    var spoken = "";
+    try { if (window.Pron && window.Pron.templateSpokenText) spoken = window.Pron.templateSpokenText(q.template); } catch (e) {}
+    return '<div class="q-fill">' + out + sayBtn(spoken, "sentence", "朗读题干") + "</div>";
   }
   function dialogueHtml(q) {
     var bi = 0;
+    var lines = [], answers = [];
     var turns = q.turns.map(function (t) {
       if (t.blank) {
         var input = '<input class="blank-input wide" name="ps-blank" autocomplete="off" spellcheck="false" placeholder="补全这句">';
         bi++;
+        lines.push(null);
+        // 答案仅在“含答案播放”（判分揭晓后）时才会被朗读
+        answers.push(q.blanks[bi - 1] && q.blanks[bi - 1].accepted ? q.blanks[bi - 1].accepted[0] : "");
         return '<div class="turn is-blank"><span class="spk">' + esc(t.speaker) + '</span><span class="bubble">' + input + "</span></div>";
       }
-      return '<div class="turn"><span class="spk">' + esc(t.speaker) + '</span><span class="bubble">' + esc(t.text) + "</span></div>";
+      lines.push(t.text);
+      answers.push(null);
+      return '<div class="turn"><span class="spk">' + esc(t.speaker) + '</span><span class="bubble">' + it(t.text) + sayBtn(t.text, "sentence", "播放这句") + "</span></div>";
     }).join("");
-    return '<div class="context">' + esc(q.context || "") + '</div><div class="dialogue">' + turns + "</div>";
+    var key = regDlg(lines, answers);
+    return '<div class="context">' + it(q.context || "") + "</div>" +
+      '<div class="dlg-tools">' + dlgBtn(key, "播放完整对话（跳过未填的空）", false) + "</div>" +
+      '<div class="dialogue">' + turns + "</div>";
   }
 
   /* ============================================================
@@ -337,26 +364,45 @@
     if (showFeedback) markOptions(q, rec);
   }
 
+  /* 为一道对话题注册“含答案”的行数据（用于判分揭晓后的完整播放） */
+  function dlgKeyFor(q) {
+    if (!q || q.type !== "dialogue" || !q.turns) return "";
+    var lines = [], answers = [], bi = 0;
+    q.turns.forEach(function (t) {
+      if (t.blank) {
+        lines.push(null);
+        answers.push(q.blanks && q.blanks[bi] && q.blanks[bi].accepted ? q.blanks[bi].accepted[0] : "");
+        bi++;
+      } else { lines.push(t.text); answers.push(null); }
+    });
+    return regDlg(lines, answers);
+  }
+
   function feedbackHtml(rec, q) {
     var cls = rec.correct ? "ok" : "bad";
     var h = '<div class="fb ' + cls + '">' +
       '<div class="fb-verdict">' + (rec.correct ? "✓ 回答正确" : "✗ 回答错误") + "</div>" +
-      '<div class="fb-row"><span class="fb-k">你的答案：</span><span class="fb-v">' + esc(rec.userAnswer) + "</span></div>";
+      '<div class="fb-row"><span class="fb-k">你的答案：</span><span class="fb-v">' + it(rec.userAnswer) + sayBtn(rec.userAnswer, "sentence", "朗读你的答案") + "</span></div>";
     if (!rec.correct)
-      h += '<div class="fb-row"><span class="fb-k">正确答案：</span><span class="fb-v ans">' + esc(rec.correctAnswer) + "</span></div>";
+      h += '<div class="fb-row"><span class="fb-k">正确答案：</span><span class="fb-v ans">' + it(rec.correctAnswer) + sayBtn(rec.correctAnswer, "sentence", "朗读正确答案") + "</span></div>";
     if (rec.knowledgePoint)
-      h += '<div class="fb-row"><span class="fb-k">相关知识点：</span><span class="fb-v">' + esc(rec.knowledgePoint) + "</span></div>";
+      h += '<div class="fb-row"><span class="fb-k">相关知识点：</span><span class="fb-v">' + it(rec.knowledgePoint) + "</span></div>";
     if (rec.explanation)
-      h += '<div class="fb-expl"><strong>讲解：</strong>' + esc(rec.explanation) + "</div>";
+      h += '<div class="fb-expl"><strong>讲解：</strong>' + it(rec.explanation) + "</div>";
     if (rec.explanation)
       h += '<div class="fb-actions"><button type="button" class="btn ghost sm" data-act="expl-done">已读完解析</button></div>';
+    // 对话题：答案已揭晓，可播放“含答案”的完整对话
+    if (q && q.type === "dialogue") {
+      var dk = dlgKeyFor(q);
+      if (dk) h += '<div class="fb-row dlg-tools"><span class="fb-k">对话朗读：</span>' + dlgBtn(dk, "播放完整对话（含答案）", true) + "</div>";
+    }
     if (!rec.correct) {
       // 其他选项为何不对（选择题）
       if (q.type === "mcq" && q.distractorExplanations) {
         var wrongs = [];
         q.options.forEach(function (o, i) {
           if (i !== q.answerIndex && q.distractorExplanations[String(i)])
-            wrongs.push('<li><strong>' + "ABCD"[i] + ". " + esc(o) + "</strong> — " + esc(q.distractorExplanations[String(i)]) + "</li>");
+            wrongs.push('<li><strong>' + "ABCD"[i] + ". " + it(o) + "</strong> — " + esc(q.distractorExplanations[String(i)]) + "</li>");
         });
         if (wrongs.length) h += '<div class="fb-why"><strong>其他选项为什么不对：</strong><ul>' + wrongs.join("") + "</ul></div>";
       }
@@ -453,12 +499,17 @@
         '<span class="unit-badge sm">' + unitLabel(a.unit) + "</span>" +
         '<span class="type-badge">' + TYPE_LABEL[a.type] + "</span></div>";
       var q = app().Q_BY_ID[a.qid];
-      if (q) h += '<div class="rev-q">' + esc(q.question) + "</div>";
-      h += '<div class="rev-row"><span class="fb-k">你的答案：</span>' + esc(a.userAnswer) + "</div>";
-      if (!a.correct) h += '<div class="rev-row"><span class="fb-k">正确答案：</span><span class="ans">' + esc(a.correctAnswer) + "</span></div>";
+      if (q) h += '<div class="rev-q">' + it(q.question) + sayBtn(q.question, "sentence", "朗读题干") + "</div>";
+      h += '<div class="rev-row"><span class="fb-k">你的答案：</span>' + it(a.userAnswer) + sayBtn(a.userAnswer, "sentence", "朗读你的答案") + "</div>";
+      if (!a.correct) h += '<div class="rev-row"><span class="fb-k">正确答案：</span><span class="ans">' + it(a.correctAnswer) + sayBtn(a.correctAnswer, "sentence", "朗读正确答案") + "</span></div>";
       if (showExpl) {
-        if (a.knowledgePoint) h += '<div class="rev-row"><span class="fb-k">知识点：</span>' + esc(a.knowledgePoint) + "</div>";
-        if (a.explanation) h += '<div class="rev-expl">' + esc(a.explanation) + "</div>";
+        if (a.knowledgePoint) h += '<div class="rev-row"><span class="fb-k">知识点：</span>' + it(a.knowledgePoint) + "</div>";
+        if (a.explanation) h += '<div class="rev-expl">' + it(a.explanation) + "</div>";
+      }
+      // 结果页已判分：对话题可播放“含答案”的完整对话
+      if (q && q.type === "dialogue") {
+        var rdk = dlgKeyFor(q);
+        if (rdk) h += '<div class="rev-row dlg-tools"><span class="fb-k">对话朗读：</span>' + dlgBtn(rdk, "播放完整对话（含答案）", true) + "</div>";
       }
       h += "</div>";
     });
@@ -528,7 +579,7 @@
       '<span class="unit-badge sm">' + unitLabel(q.unit) + "</span>" +
       '<span class="type-badge">' + TYPE_LABEL[q.type] + "</span>" +
       "</div></div>" +
-      '<div class="runner-body"><div class="q-text">' + esc(q.question) + "</div>" + questionBody(q) + "</div>" +
+      '<div class="runner-body"><div class="q-text">' + it(q.question) + sayBtn(q.question, "sentence", "朗读题干") + "</div>" + questionBody(q) + "</div>" +
       '<div class="runner-actions"><button class="btn primary" id="btn-submit" data-act="submit-preview" data-q="' + esc(q.id) + '">提交</button>' +
       '<div id="q-feedback" class="q-feedback"></div>' +
       '<button class="btn ghost" data-act="close-preview">返回原题</button></div></div>';
@@ -611,11 +662,11 @@
           '<div class="rev-head"><span class="unit-badge sm">' + unitLabel(q.unit) + "</span>" +
           '<span class="type-badge">' + TYPE_LABEL[q.type] + "</span>" +
           '<span class="rev-time">' + new Date(m.info.at).toLocaleString() + "</span></div>" +
-          '<div class="rev-q">' + esc(q.question) + "</div>" +
-          '<div class="rev-row"><span class="fb-k">你的答案：</span>' + esc(m.info.wrongAnswer) + "</div>" +
-          '<div class="rev-row"><span class="fb-k">正确答案：</span><span class="ans">' + esc(m.info.correctAnswer) + "</span></div>" +
-          (q.knowledgePoint ? '<div class="rev-row"><span class="fb-k">知识点：</span>' + esc(q.knowledgePoint) + "</div>" : "") +
-          (q.explanation ? '<div class="rev-expl">' + esc(q.explanation) + "</div>" : "") +
+          '<div class="rev-q">' + it(q.question) + sayBtn(q.question, "sentence", "朗读题干") + "</div>" +
+          '<div class="rev-row"><span class="fb-k">你的答案：</span>' + it(m.info.wrongAnswer) + sayBtn(m.info.wrongAnswer, "sentence", "朗读你的答案") + "</div>" +
+          '<div class="rev-row"><span class="fb-k">正确答案：</span><span class="ans">' + it(m.info.correctAnswer) + sayBtn(m.info.correctAnswer, "sentence", "朗读正确答案") + "</span></div>" +
+          (q.knowledgePoint ? '<div class="rev-row"><span class="fb-k">知识点：</span>' + it(q.knowledgePoint) + "</div>" : "") +
+          (q.explanation ? '<div class="rev-expl">' + it(q.explanation) + "</div>" : "") +
           '<div class="rev-actions"><button class="btn sm" data-act="show-similar" data-q="' + esc(q.id) + '">同类题</button></div>' +
           "</div>";
       });
@@ -634,6 +685,9 @@
 
     // 声音设置（面板 HTML 由 sound.js 提供，控件事件在 sound.js 内以 document 委托接线）
     h += (window.Sound && window.Sound.settingsHtml) ? window.Sound.settingsHtml() : "";
+
+    // 发音设置（面板 HTML 由 pronunciation.js 提供，事件同样在其内部以 document 委托接线）
+    h += (window.Pron && window.Pron.settingsHtml) ? window.Pron.settingsHtml() : "";
 
     h += '<div class="results-actions"><button class="btn ghost" data-act="reset-progress">清空全部进度</button></div>';
     h += "</div>";

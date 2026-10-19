@@ -96,7 +96,7 @@
       return '<button class="tab' + (x.id === u.id ? " active" : "") + '" data-act="kn-unit" data-u="' + x.id + '">Unit ' + x.number + ' · ' + esc(x.title) + '</button>';
     }).join("");
     $("#kn-unit-meta").innerHTML =
-      '<div class="kn-overview"><strong>本单元概述：</strong>' + esc(u.overview) +
+      '<div class="kn-overview"><strong>本单元概述：</strong>' + it(u.overview) +
       '<div class="kn-pages">来源：' + esc(u.sourcePdf) + ' · ' + esc(u.pages) + '</div></div>';
 
     $("#kn-topic-list").innerHTML = u.topics.map(function (t, i) {
@@ -104,7 +104,7 @@
       return '<div class="topic-item' + (done ? " done" : "") + '">' +
         '<button class="topic-open" data-act="kn-open" data-t="' + t.id + '">' +
         '<span class="topic-idx">' + (i + 1) + '</span>' +
-        '<span class="topic-name">' + esc(t.title) + '<small>' + esc(t.titleIt) + '</small></span>' +
+        '<span class="topic-name">' + esc(t.title) + '<small>' + it(t.titleIt) + '</small></span>' +
         '<span class="imp imp-' + t.importance + '">' + IMP_LABEL[t.importance] + '</span>' +
         '</button>' +
         '<label class="check"><input type="checkbox" data-act="kn-check" data-t="' + t.id + '"' + (done ? " checked" : "") + '><span>完成</span></label>' +
@@ -119,41 +119,42 @@
     if (!hit) return;
     var t = hit.topic, u = hit.unit;
     var h = '<div class="detail-head">' +
-      '<div><span class="unit-badge sm">U' + u.number + '</span><h3>' + esc(t.title) + ' <span class="it-title">' + esc(t.titleIt) + '</span></h3></div>' +
+      '<div><span class="unit-badge sm">U' + u.number + '</span><h3>' + esc(t.title) + ' <span class="it-title">' + it(t.titleIt) + '</span></h3></div>' +
       '<span class="imp imp-' + t.importance + '">' + IMP_LABEL[t.importance] + '</span>' +
       '</div>';
 
-    h += section("知识讲解", '<p class="k-p">' + esc(t.knowledge) + "</p>");
+    h += section("知识讲解", '<p class="k-p">' + it(t.knowledge) + "</p>");
 
     if (t.rules && t.rules.length)
-      h += section("重要规则", '<ul class="rules">' + t.rules.map(function (r) { return "<li>" + esc(r) + "</li>"; }).join("") + "</ul>");
+      h += section("重要规则", '<ul class="rules">' + t.rules.map(function (r) { return "<li>" + it(r) + "</li>"; }).join("") + "</ul>");
 
     if (t.vocabulary && t.vocabulary.length)
-      h += section("词汇", table(["意大利语", "中文", "备注"], t.vocabulary.map(function (v) { return [v.it, v.zh, v.note || ""]; })));
+      h += section("词汇", table(["意大利语", "中文", "备注"], t.vocabulary.map(function (v) { return [it(v.it), v.zh, v.note || ""]; }), [0]));
 
     if (t.grammarTables && t.grammarTables.length) {
       h += section("语法表格", t.grammarTables.map(function (g) {
-        var tb = table(g.headers, g.rows);
+        var rawCols = g.headers.map(function (_, i) { return i; });
+        var tb = table(g.headers, g.rows.map(function (r) { return r.map(it); }), rawCols);
         return '<div class="gtable"><div class="gtable-title">' + esc(g.title) + "</div>" + tb + (g.note ? '<div class="gtable-note">注：' + esc(g.note) + "</div>" : "") + "</div>";
       }).join(""));
     }
 
     if (t.examples && t.examples.length)
       h += section("例句（原文 + 中文）", t.examples.map(function (e) {
-        return '<div class="example"><div class="ex-it">' + esc(e.it) + '</div><div class="ex-zh">' + esc(e.zh) + "</div></div>";
+        return '<div class="example"><div class="ex-it">' + it(e.it) + sayBtn(e.it, "sentence", "朗读整句") + '</div><div class="ex-zh">' + esc(e.zh) + "</div></div>";
       }).join(""));
 
     if (t.steps)
-      h += section("逐步讲解", '<p class="k-p">' + esc(t.steps) + "</p>");
+      h += section("逐步讲解", '<p class="k-p">' + it(t.steps) + "</p>");
 
     if (t.commonMistakes && t.commonMistakes.length)
       h += section("常见错误（依据课程规则，非官方考点声明）",
         '<ul class="mistakes">' + t.commonMistakes.map(function (m) {
-          return '<li><span class="wrong">✗ ' + esc(m.right ? m.wrong : m.wrong) + '</span><br><span class="right">✓ ' + esc(m.right) + '</span><div class="why">' + esc(m.why) + "</div></li>";
+          return '<li><span class="wrong">✗ ' + it(m.wrong) + '</span><br><span class="right">✓ ' + it(m.right) + '</span><div class="why">' + it(m.why) + "</div></li>";
         }).join("") + "</ul>");
 
     if (t.summary && t.summary.length)
-      h += section("考试复习小结", '<ul class="summary">' + t.summary.map(function (s) { return "<li>" + esc(s) + "</li>"; }).join("") + "</ul>");
+      h += section("考试复习小结", '<ul class="summary">' + t.summary.map(function (s) { return "<li>" + it(s) + "</li>"; }).join("") + "</ul>");
 
     if (t.miniPractice && t.miniPractice.length)
       h += section("小练习（附答案与讲解）", t.miniPractice.map(function (mp, i) { return miniPracticeHtml(mp, i); }).join(""));
@@ -168,23 +169,27 @@
   function section(title, body) {
     return '<section class="sec"><h4 class="sec-title">' + esc(title) + "</h4>" + body + "</section>";
   }
-  function table(headers, rows) {
+  function table(headers, rows, rawCols) {
     return '<div class="tbl-wrap"><table class="tbl"><thead><tr>' +
       headers.map(function (x) { return "<th>" + esc(x) + "</th>"; }).join("") +
       "</tr></thead><tbody>" +
       rows.map(function (r) {
-        return "<tr>" + r.map(function (c) { return "<td>" + esc(c) + "</td>"; }).join("") + "</tr>";
+        return "<tr>" + r.map(function (c, ci) {
+          // rawCols 指定的列已由 it() 生成（内部已转义），不再二次转义
+          var isRaw = rawCols && rawCols.indexOf(ci) >= 0;
+          return "<td>" + (isRaw ? c : esc(c)) + "</td>";
+        }).join("") + "</tr>";
       }).join("") + "</tbody></table></div>";
   }
   function miniPracticeHtml(mp, idx) {
     var opts = (mp.options || []).map(function (o, i) {
-      return '<button class="mini-opt" data-act="mini" data-idx="' + idx + '" data-opt="' + i + '">' + esc(o) + "</button>";
+      return '<button class="mini-opt" data-act="mini" data-idx="' + idx + '" data-opt="' + i + '">' + it(o) + "</button>";
     }).join("");
     return '<div class="mini" data-mini="' + idx + '">' +
-      '<div class="mini-q">' + esc(mp.q) + "</div>" +
+      '<div class="mini-q">' + it(mp.q) + "</div>" +
       '<div class="mini-opts">' + opts + "</div>" +
       '<div class="mini-fb"></div>' +
-      '<div class="mini-answer hidden"><strong>答案：</strong>' + esc(mp.answer) + '<div class="mini-expl">' + esc(mp.explain || "") + "</div></div>" +
+      '<div class="mini-answer hidden"><strong>答案：</strong>' + it(mp.answer) + sayBtn(mp.answer, "sentence", "朗读答案") + '<div class="mini-expl">' + it(mp.explain || "") + "</div></div>" +
       "</div>";
   }
 
@@ -193,6 +198,13 @@
    * ============================================================ */
   /* 音效便捷调用：集中生成在 sound.js，这里只在正确事件点触发（安全降级） */
   function snd(name) { try { var S = window.Sound; if (S && typeof S[name] === "function") return S[name](); } catch (e) {} }
+
+  /* 发音渲染助手：集中于 pronunciation.js（安全降级为普通转义） */
+  function it(s) { try { if (window.Pron && window.Pron.it) return window.Pron.it(s); } catch (e) {} return esc(s); }
+  function sayBtn(text, mode, label) {
+    try { if (window.Pron && window.Pron.sayBtn) return window.Pron.sayBtn(text, mode, label); } catch (e) {}
+    return "";
+  }
 
   document.addEventListener("click", function (ev) {
     var el = ev.target.closest("[data-act]");
@@ -273,8 +285,8 @@
     });
     fb.className = "mini-fb " + (correct ? "ok" : "bad");
     fb.innerHTML = correct
-      ? "✓ 正确！" + esc(mp.explain || "")
-      : "✗ 不正确。正确答案：<strong>" + esc(answer) + "</strong><div class='mini-expl'>" + esc(mp.explain || "") + "</div>";
+      ? "✓ 正确！" + it(mp.explain || "")
+      : "✗ 不正确。正确答案：<strong>" + it(answer) + "</strong>" + sayBtn(answer, "sentence", "朗读答案") + "<div class='mini-expl'>" + it(mp.explain || "") + "</div>";
     var ansBox = wrap.querySelector(".mini-answer");
     if (ansBox) ansBox.classList.remove("hidden");
   }

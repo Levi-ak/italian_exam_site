@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>答案判定自动化测试 · 意语备考复习站</title>
+<style>
+  body{font-family:"Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+       background:#f4f6fa;color:#1f2430;margin:0;padding:30px;line-height:1.6}
+  .wrap{max-width:820px;margin:0 auto}
+  h1{font-size:22px}
+  .sum{font-size:18px;font-weight:700;padding:14px 18px;border-radius:12px;margin-bottom:18px}
+  .sum.ok{background:#e7f6ec;color:#27823a;border:1px solid #bfe8ca}
+  .sum.bad{background:#ffe3e3;color:#c92a2a;border:1px solid #ffc9c9}
+  .t{display:flex;gap:12px;align-items:flex-start;background:#fff;border:1px solid #e6e9f0;
+     border-radius:10px;padding:10px 14px;margin-bottom:8px}
+  .t .mark{font-weight:800;min-width:22px}
+  .t.pass .mark{color:#27823a}
+  .t.fail{border-color:#ffc9c9;background:#fffafa}
+  .t.fail .mark{color:#c92a2a}
+  .t .name{font-weight:600}
+  .t .det{font-size:13px;color:#8a91a3}
+  .note{font-size:13px;color:#8a91a3;margin-top:20px}
+  code{background:#eef1f7;padding:1px 6px;border-radius:5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>答案判定自动化测试</h1>
+  <div id="sum" class="sum">运行中…</div>
+  <div id="list"></div>
+  <p class="note">
+    本页独立加载 <code>js/grading.js</code> 并对判分逻辑（大小写 / 空格 / 标点 / 重音宽容、
+    多可接受答案、填空逐空判分、选择题判分）进行断言。全部通过即判分引擎可用。
+    这些用例与无头脚本 <code>_work/validate.py</code> 中的用例一致。
+  </p>
+</div>
+
+<script src="../js/grading.js"></script>
+<script>
+(function () {
+  var G = window.Grading;
+  var results = [];
+
+  function eq(name, got, want) {
+    var g = JSON.stringify(got), w = JSON.stringify(want);
+    results.push({ name: name, got: g, want: w, pass: g === w });
+  }
+
+  // G.canonical — 规范化
+  eq("大小写 / 空格 / 标点", G.canonical("Buongiorno,  professore!"), "buongiorno professore");
+  eq("重音宽容 caffe == caffè", G.canonical("caffe"), G.canonical("caffè"));
+  eq("统一直/弯引号 ’ == '", G.canonical("l\u2019acqua"), G.canonical("l'acqua"));
+
+  // G.matchAny — 单个可接受集合 / 多可接受答案
+  eq("matchAny 重音等价", G.matchAny("caffè", "caffe").correct, true);
+  eq("多可接受答案 A", G.matchAny("22", ["22", "ventidue"]).correct, true);
+  eq("多可接受答案 B", G.matchAny("ventidue", ["22", "ventidue"]).correct, true);
+  eq("错误判错", G.matchAny("trenta", ["22", "ventidue"]).correct, false);
+  eq("空输入判错", G.matchAny("", ["di"]).correct, false);
+  eq("句中词匹配", G.matchAny("voglio", ["voglio"]).correct, true);
+
+  // G.checkChoice — 选择题
+  eq("选择题正确", G.checkChoice("B", "B").correct, true);
+  eq("选择题错误", G.checkChoice("A", "B").correct, false);
+
+  // G.checkBlanks — 填空 / 对话逐空
+  eq("填空全对", G.checkBlanks(["Mi chiamo"], [{ accepted: ["Mi chiamo"] }]).correct, true);
+  eq("填空错", G.checkBlanks(["sono"], [{ accepted: ["Mi chiamo"] }]).correct, false);
+  eq("多空全对", G.checkBlanks(["di", "Ho"], [{ accepted: ["di"] }, { accepted: ["ho"] }]).correct, true);
+  eq("多空一错", G.checkBlanks(["di", "hao"], [{ accepted: ["di"] }, { accepted: ["ho"] }]).correct, false);
+
+  // render
+  var list = document.getElementById("list");
+  var passed = 0;
+  results.forEach(function (r) {
+    if (r.pass) passed++;
+    var d = document.createElement("div");
+    d.className = "t " + (r.pass ? "pass" : "fail");
+    d.innerHTML = '<span class="mark">' + (r.pass ? "✓" : "✗") + '</span>' +
+      '<div><div class="name">' + r.name + '</div>' +
+      (r.pass ? "" : '<div class="det">got=' + r.got + " want=" + r.want + "</div>") + "</div>";
+    list.appendChild(d);
+  });
+
+  var sum = document.getElementById("sum");
+  sum.className = "sum " + (passed === results.length ? "ok" : "bad");
+  sum.textContent = passed + " / " + results.length + " 通过" +
+    (passed === results.length ? " —— 判分引擎正常 ✓" : " —— 存在失败用例 ✗");
+})();
+</script>
+</body>
+</html>
